@@ -6,8 +6,8 @@ import os
 import tempfile
 
 import numpy as np
-from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, File, Form, Request, UploadFile
+from fastapi.responses import JSONResponse, PlainTextResponse
 from faster_whisper import WhisperModel
 
 logging.basicConfig(level=logging.INFO)
@@ -33,10 +33,10 @@ VAD_PARAMETERS = dict(
 )
 
 
-def transcribe_audio(audio_path: str) -> str:
+def transcribe_audio(audio_path: str, language: str = LANGUAGE) -> str:
     segments, _info = model.transcribe(
         audio_path,
-        language=LANGUAGE,
+        language=language,
         beam_size=3,
         vad_filter=True,
         vad_parameters=VAD_PARAMETERS,
@@ -98,6 +98,44 @@ async def api_transcribe(request: Request):
     except Exception as e:
         log.exception("Transcription failed")
         return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/v1/audio/transcriptions")
+async def openai_transcribe(
+    file: UploadFile = File(...),
+    model: str = Form(None),  # accepted for OpenAI compat; ignored (server uses STT_MODEL)
+    language: str = Form(None),
+    response_format: str = Form("json"),
+    prompt: str = Form(None),  # accepted for compat; not yet used
+    temperature: str = Form(None),  # accepted for compat; not yet used
+):
+    """OpenAI-compatible transcription endpoint.
+
+    Mirrors POST /v1/audio/transcriptions: multipart/form-data with a `file`
+    part plus the usual `model`/`language`/`response_format` fields. Reuses the
+    same faster-whisper model as /api/transcribe.
+    """
+    ext = os.path.splitext(file.filename or "")[1] or ".webm"
+    try:
+        raw = await file.read()
+        with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as f:
+            f.write(raw)
+            tmp_path = f.name
+        try:
+            text = transcribe_audio(tmp_path, language=language or LANGUAGE)
+        finally:
+            os.unlink(tmp_path)
+
+        if response_format == "text":
+            return PlainTextResponse(text)
+        return JSONResponse({"text": text})
+
+    except Exception as e:
+        log.exception("Transcription failed")
+        return JSONResponse(
+            {"error": {"message": str(e), "type": "server_error"}},
+            status_code=500,
+        )
 
 
 @app.get("/health")
