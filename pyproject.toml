@@ -9,6 +9,7 @@ dependencies = [
     "numpy>=2.4.4",
     "nvidia-cublas-cu12>=12.9.2.10",
     "nvidia-cudnn-cu12>=9.21.0.82",
-    "python-multipart>=0.0.26",
+    # >=0.0.27 fixes CVE-2026-42561 (unbounded multipart part headers, DoS)
+    "python-multipart>=0.0.27",
     "uvicorn>=0.44.0",
 ]
