@@ -311,9 +311,31 @@ Two settings differ from the GPU defaults and both are required:
 
   All sizes are quantised `int8` weights on disk; the first run downloads them.
 
+**Use your cores.** faster-whisper runs on **4 threads by default, however
+many cores you have.** Set `OMP_NUM_THREADS` to your physical core count (add
+an `Environment=OMP_NUM_THREADS=8` line to the systemd unit). Going from 4 to
+8 threads cut `large-v3` time by about a quarter in the measurements below;
+hyperthreads add little.
+
+**What "slow" means in practice.** Measured on 4 threads of a desktop Zen 3
+CPU (Threadripper PRO 5955WX), `int8`, beam size 3, VAD on, with a 53.5 s clip
+of continuous dictation:
+
+| Model | Transcribe time | Fraction of realtime |
+|---|---|---|
+| `small` | 5.5 s | 0.10× |
+| `large-v3-turbo` | 11.5 s | 0.22× |
+| `large-v3` | 24.1 s | 0.45× |
+| `large-v3`, 8 threads | 18.2 s | 0.34× |
+
+All four produced the same transcript of that clean, synthetic clip. A
+four-year-old laptop i5 is roughly half the per-core speed and throttles under
+sustained load, so expect about double these times there: `large-v3` at or a
+little slower than realtime, `large-v3-turbo` around half of realtime. That
+makes `large-v3` fine for record-then-transcribe dictation and batch jobs, and
+`large-v3-turbo` the better choice when you want the text back quickly.
+
 Everything else — endpoints, VAD, timestamps, the systemd unit — is unchanged.
-CTranslate2 uses all cores by default; set `OMP_NUM_THREADS` to limit it on a
-shared machine.
 
 ---
 
