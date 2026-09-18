@@ -1,15 +1,25 @@
 [project]
 name = "stt-faster-whisper"
 version = "0.1.0"
-description = "Add your description here"
+description = "Self-hosted faster-whisper STT service"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.135.3",
     "faster-whisper>=1.2.1",
     "numpy>=2.4.4",
-    "nvidia-cublas-cu12>=12.9.2.10",
-    "nvidia-cudnn-cu12>=9.21.0.82",
     # >=0.0.27 fixes CVE-2026-42561 (unbounded multipart part headers, DoS)
     "python-multipart>=0.0.27",
     "uvicorn>=0.44.0",
 ]
+
+# CUDA runtime libraries (cuBLAS + cuDNN) that CTranslate2 loads at model-load
+# time. Installed by `uv sync` by default; CPU-only installs skip them with
+# `uv sync --no-group cuda`. Stay on cu12: CTranslate2 4.x is built against CUDA 12.
+[dependency-groups]
+cuda = [
+    "nvidia-cublas-cu12>=12.9.2.10",
+    "nvidia-cudnn-cu12>=9.21.0.82",
+]
+
+[tool.uv]
+default-groups = ["cuda"]

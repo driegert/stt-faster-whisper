@@ -35,8 +35,10 @@ automatically.
   supports, and it needs to say 12.x or higher.
 - ~2 GB of free VRAM for `large-v3` at `int8_float16`, plus ~3 GB of disk for
   the downloaded model weights.
-- No GPU? It still runs on CPU — see [CPU-only](#cpu-only-no-nvidia-gpu). Expect
-  it to be many times slower.
+- No GPU? It still runs on CPU with a smaller model — see
+  [CPU-only](#cpu-only-no-nvidia-gpu). `small` needs ~1 GB of RAM and is
+  roughly realtime on a modern laptop; `large-v3` is not usable interactively
+  on CPU.
 
 **Software**
 
@@ -78,14 +80,25 @@ uv add \
   "fastapi>=0.135.3" \
   "uvicorn>=0.44.0" \
   "python-multipart>=0.0.27" \
-  "numpy>=2.4.4" \
+  "numpy>=2.4.4"
+uv add --group cuda \
   "nvidia-cublas-cu12>=12.9.2.10" \
   "nvidia-cudnn-cu12>=9.21.0.82"
 ```
 
+The CUDA libraries go in a `cuda` dependency group rather than the main
+dependency list so CPU-only installs can leave them out. Make the group install
+by default by adding this to `pyproject.toml` (the full file is in
+[Appendix B](#appendix-b--pyprojecttoml)):
+
+```toml
+[tool.uv]
+default-groups = ["cuda"]
+```
+
 Then save the server source from [Appendix A](#appendix-a--stt_serverpy) as
-`stt_server.py` in that directory. (Skip the `nvidia-*` packages if you are
-going CPU-only.)
+`stt_server.py` in that directory. (Going CPU-only? Skip the `uv add --group
+cuda` command and the `[tool.uv]` block entirely.)
 
 > **`python-multipart` must be 0.0.27 or newer.** Earlier versions carry
 > [CVE-2026-42561](https://github.com/Kludex/python-multipart/security/advisories/GHSA-pp6c-gr5w-3c5g)
@@ -109,6 +122,16 @@ uv sync
 This creates `.venv/` and installs the exact versions pinned in `uv.lock`
 (faster-whisper, ctranslate2, fastapi, uvicorn, python-multipart, numpy, and the
 cuBLAS/cuDNN CUDA libraries).
+
+**CPU-only:** the CUDA libraries live in a `cuda` dependency group that is on
+by default. Leave it out — it is several hundred megabytes you cannot use:
+
+```bash
+uv sync --no-group cuda
+```
+
+Re-running plain `uv sync` later will add the CUDA libraries back, so keep the
+flag in whatever script or alias you use to update the install.
 
 If you bootstrapped from scratch in step 2, `uv add` already did this — there is
 nothing more to do here.
@@ -249,7 +272,8 @@ Useful `STT_MODEL` values, fastest to most accurate:
 
 | Model | Notes |
 |---|---|
-| `small`, `medium` | Lower quality, low VRAM. |
+| `tiny`, `base` | The CPU-oriented sizes. `base` is a reasonable rough draft; `tiny` is fast but error-prone. |
+| `small`, `medium` | Lower quality than the large models, low VRAM. `small` is the usual CPU choice. |
 | `distil-large-v3`, `distil-large-v3.5` | Distilled; noticeably faster than `large-v3`, slightly lower quality. English-focused. |
 | `large-v3-turbo` (alias `turbo`) | Much faster than `large-v3` with a small accuracy cost. A good default if `large-v3` is too slow. |
 | `large-v3` | Best quality. What this guide defaults to. |
@@ -260,12 +284,36 @@ if you want maximum fidelity and have the VRAM.
 
 ### CPU-only (no NVIDIA GPU)
 
+Install without the CUDA libraries, skip step 4, and pick a smaller model:
+
 ```bash
+uv sync --no-group cuda
 STT_DEVICE=cpu STT_COMPUTE_TYPE=int8 STT_MODEL=small uv run python stt_server.py
 ```
 
-Skip step 4 entirely, and drop the `nvidia-*` dependencies. `large-v3` on CPU is
-usually too slow to be useful interactively.
+Two settings differ from the GPU defaults and both are required:
+
+- **`STT_COMPUTE_TYPE` must be `int8`** (or `float32`). The default
+  `int8_float16` is a GPU compute type; on CPU the model refuses to load with
+  `Requested int8_float16 compute type, but the target device or backend do not
+  support efficient int8_float16 computation`. `int8` is also the fastest CPU
+  option.
+- **`STT_MODEL` should be a small model.** Rough guidance for an English-only
+  workload on a modern desktop or laptop CPU:
+
+  | Model | RAM | When to use it |
+  |---|---|---|
+  | `tiny` | ~0.5 GB | Very fast, noticeably error-prone. Rough drafts only. |
+  | `base` | ~0.5 GB | Weak machines. Usable quality for clear speech. |
+  | `small` | ~1 GB | The usual CPU choice: near realtime, decent accuracy. |
+  | `distil-large-v3`, `large-v3-turbo` | ~2–3 GB | Much better accuracy than `small`. Viable on a fast desktop CPU because they have far fewer decoder layers than `large-v3`; try one if quality matters more than speed. |
+  | `medium`, `large-v3` | 3–6 GB | Too slow on CPU to be useful interactively. |
+
+  All sizes are quantised `int8` weights on disk; the first run downloads them.
+
+Everything else — endpoints, VAD, timestamps, the systemd unit — is unchanged.
+CTranslate2 uses all cores by default; set `OMP_NUM_THREADS` to limit it on a
+shared machine.
 
 ---
 
@@ -293,11 +341,14 @@ Restart=always
 RestartSec=5
 
 # Required so CTranslate2 can find the CUDA libs inside the venv (see step 4).
+# CPU-only: delete this line.
 Environment=LD_LIBRARY_PATH=${SITE_PACKAGES}/nvidia/cublas/lib:${SITE_PACKAGES}/nvidia/cudnn/lib
 
 # Pin to a single GPU on a multi-GPU machine; drop this line otherwise.
 #Environment=CUDA_VISIBLE_DEVICES=0
 
+# CPU-only: use STT_MODEL=small, STT_DEVICE=cpu, STT_COMPUTE_TYPE=int8 instead
+# (see the CPU-only section above).
 Environment=STT_MODEL=large-v3
 Environment=STT_DEVICE=cuda
 Environment=STT_COMPUTE_TYPE=int8_float16
@@ -511,6 +562,12 @@ aren't running multiple copies of the service.
 **`Form data requires "python-multipart" to be installed`**
 The dependency is missing — run `uv sync`.
 
+**`ValueError: Requested int8_float16 compute type, but the target device or backend do not support efficient int8_float16 computation`**
+You are running on CPU (`STT_DEVICE=cpu`, or CUDA was not found) with the GPU
+default compute type. Set `STT_COMPUTE_TYPE=int8` — see
+[CPU-only](#cpu-only-no-nvidia-gpu). The same message with `float16` means the
+same thing.
+
 **Empty `{"text": ""}` response**
 Usually correct behaviour: Silero VAD found no speech. Check that your clip
 actually contains audible speech, and that `STT_LANGUAGE` matches the language
@@ -692,12 +749,22 @@ dependencies = [
     "fastapi>=0.135.3",
     "faster-whisper>=1.2.1",
     "numpy>=2.4.4",
-    "nvidia-cublas-cu12>=12.9.2.10",
-    "nvidia-cudnn-cu12>=9.21.0.82",
     # >=0.0.27 fixes CVE-2026-42561 (unbounded multipart part headers, DoS)
     "python-multipart>=0.0.27",
     "uvicorn>=0.44.0",
 ]
+
+# CUDA runtime libraries (cuBLAS + cuDNN) that CTranslate2 loads at model-load
+# time. Installed by `uv sync` by default; CPU-only installs skip them with
+# `uv sync --no-group cuda`. Stay on cu12: CTranslate2 4.x is built against CUDA 12.
+[dependency-groups]
+cuda = [
+    "nvidia-cublas-cu12>=12.9.2.10",
+    "nvidia-cudnn-cu12>=9.21.0.82",
+]
+
+[tool.uv]
+default-groups = ["cuda"]
 ```
 
 These are floors, not pins — `uv` resolves them upward and records the exact
