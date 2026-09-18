@@ -19,8 +19,10 @@ reverse proxy in front of it if you need any of that.
 
 Same `large-v3` weights, same output quality, but CTranslate2 runs them several
 times faster in roughly 1.8 GB of VRAM instead of about 10 GB. On a single RTX
-3090 a 15-second clip round-trips in under half a second. Silence is trimmed by
-VAD before the model sees it, so cost tracks speech, not file length.
+3090 a 15-second clip round-trips in under half a second. Without a GPU,
+`large-v3` on four threads of a Threadripper PRO 5955WX transcribes a 53-second
+dictation in 24 seconds, and `large-v3-turbo` in 12. Silence is trimmed by VAD
+before the model sees it, so cost tracks speech, not file length.
 
 ## Two ways to run it
 

@@ -317,9 +317,10 @@ an `Environment=OMP_NUM_THREADS=8` line to the systemd unit). Going from 4 to
 8 threads cut `large-v3` time by about a quarter in the measurements below;
 hyperthreads add little.
 
-**What "slow" means in practice.** Measured on 4 threads of a desktop Zen 3
-CPU (Threadripper PRO 5955WX), `int8`, beam size 3, VAD on, with a 53.5 s clip
-of continuous dictation:
+**What "slow" means in practice.** Measured on 4 threads of a 16-core desktop
+Zen 3 CPU (Threadripper PRO 5955WX), `int8`, beam size 3, VAD on, with a 53.5 s
+clip of continuous dictation; transcription time only, model already loaded
+(full details under [Performance](#cpu)):
 
 | Model | Transcribe time | Fraction of realtime |
 |---|---|---|
@@ -557,6 +558,29 @@ several times longer.
 The first request after startup costs an extra second or two of CUDA warmup.
 If you need more speed, try `large-v3-turbo` or `distil-large-v3.5` before
 reaching for a bigger GPU.
+
+### CPU
+
+Measured on an AMD Ryzen Threadripper PRO 5955WX (16 cores / 32 threads, Zen 3,
+up to 4.5 GHz), `int8`, beam size 3, VAD on, faster-whisper 1.2.1 /
+ctranslate2 4.8.1, on a 53.5 s clip of continuous synthetic dictation. The
+thread column is what was actually used, set with `cpu_threads`; the rest of
+the machine was idle. Times are transcription only. Model load is separate and
+happens once at startup: about 1 s for `small` and 3 s for `large-v3` from a
+warm local disk.
+
+| Model | Threads | Transcribe | Fraction of realtime |
+|---|---|---|---|
+| `small` | 4 | 5.5 s | 0.10× |
+| `large-v3-turbo` | 4 | 11.5 s | 0.22× |
+| `large-v3` | 4 | 24.1 s | 0.45× |
+| `large-v3` | 8 | 18.2 s | 0.34× |
+
+All four runs produced an identical transcript. Doubling the threads from 4 to
+8 bought about 25% on `large-v3`, so it is far from linear; the decoder is
+memory-bound. 4 threads is the faster-whisper default whatever the core count —
+see [CPU-only](#cpu-only-no-nvidia-gpu) for the `OMP_NUM_THREADS` setting and
+for how to read these numbers on a laptop.
 
 ---
 
